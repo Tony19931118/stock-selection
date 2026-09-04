@@ -1,20 +1,19 @@
 import { unstable_cache } from "next/cache";
 
-export type Market = "上市" | "上櫃";
-
 export type StockResult = {
   code: string;
   name: string;
-  market: Market;
   price: number;
   high: number;
   low: number;
   midpoint: number;
   difference: number;
   quoteTime: string;
+  peRatio: number | null;
+  dividendYield: number | null;
 };
 
-type UniverseStock = { code: string; name: string; market: Market };
+type UniverseStock = { code: string; name: string };
 
 const REQUEST_TIMEOUT = 12_000;
 const MAX_SYMBOLS = 2_000;
@@ -29,21 +28,15 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 async function getUniverse(): Promise<UniverseStock[]> {
-  const [listed, otc] = await Promise.all([
-    fetchJson<Array<Record<string, string>>>("https://openapi.twse.com.tw/v1/opendata/t187ap03_L"),
-    fetchJson<Array<Record<string, string>>>("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes"),
-  ]);
-
-  const normalize = (rows: Array<Record<string, string>>, market: Market) => rows
+  const listed = await fetchJson<Array<Record<string, string>>>("https://openapi.twse.com.tw/v1/opendata/t187ap03_L");
+  const normalize = (rows: Array<Record<string, string>>) => rows
     .map((row) => ({
       code: row["公司代號"] ?? row["SecuritiesCompanyCode"] ?? row["代號"],
       name: row["公司簡稱"] ?? row["公司名稱"] ?? row["CompanyAbbreviation"] ?? row["名稱"],
-      market,
     }))
     .filter((stock): stock is UniverseStock => /^\d{4,6}$/.test(stock.code) && !stock.code.startsWith("0") && Boolean(stock.name));
 
-  return [...normalize(listed, "上市"), ...normalize(otc, "上櫃")]
-    .filter((stock, index, all) => all.findIndex((item) => item.code === stock.code) === index)
+  return normalize(listed)
     .slice(0, MAX_SYMBOLS);
 }
 
@@ -57,10 +50,25 @@ type YahooChart = {
   };
 };
 
+type YahooSummary = {
+  quoteSummary?: {
+    result?: Array<{
+      summaryDetail?: { trailingPE?: { raw?: number }; dividendYield?: { raw?: number } };
+      defaultKeyStatistics?: { trailingPE?: { raw?: number } };
+    }>;
+  };
+};
+
 async function getStockResult(stock: UniverseStock, period1: number, period2: number): Promise<StockResult | null> {
-  const symbol = `${stock.code}.${stock.market === "上市" ? "TW" : "TWO"}`;
+  const symbol = `${stock.code}.TW`;
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d&events=history`;
-  const payload = await fetchJson<YahooChart>(url);
+  const [chartResponse, summaryResponse] = await Promise.allSettled([
+    fetchJson<YahooChart>(url),
+    fetchJson<YahooSummary>(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=summaryDetail,defaultKeyStatistics`),
+  ]);
+  if (chartResponse.status === "rejected") throw chartResponse.reason;
+  const payload = chartResponse.value;
+  const summary = summaryResponse.status === "fulfilled" ? summaryResponse.value : null;
   const result = payload.chart?.result?.[0];
   const quote = result?.indicators?.quote?.[0];
   const highs = quote?.high?.filter((value): value is number => typeof value === "number") ?? [];
@@ -76,7 +84,12 @@ async function getStockResult(stock: UniverseStock, period1: number, period2: nu
   const quoteTime = result.meta?.regularMarketTime
     ? new Date(result.meta.regularMarketTime * 1000).toLocaleTimeString("zh-TW", { hour12: false })
     : "未知";
-  return { ...stock, price, high, low, midpoint, difference: ((midpoint - price) / midpoint) * 100, quoteTime };
+  const summaryResult = summary?.quoteSummary?.result?.[0];
+  const peRatio = summaryResult?.summaryDetail?.trailingPE?.raw
+    ?? summaryResult?.defaultKeyStatistics?.trailingPE?.raw
+    ?? null;
+  const dividendYield = summaryResult?.summaryDetail?.dividendYield?.raw ?? null;
+  return { ...stock, price, high, low, midpoint, difference: ((midpoint - price) / midpoint) * 100, quoteTime, peRatio, dividendYield };
 }
 
 async function calculateStocks(): Promise<{ results: StockResult[]; processed: number; failed: number; updatedAt: string }> {
