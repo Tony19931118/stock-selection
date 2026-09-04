@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+// @ts-expect-error Next.js loads global CSS at runtime.
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "台股選股儀表板",
-  description: "依半年高低點中間值篩選台股",
+  description: "依一年高低點中間值篩選台股",
 };
 
 export default function RootLayout({

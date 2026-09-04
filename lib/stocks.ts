@@ -14,6 +14,7 @@ export type StockResult = {
 };
 
 type UniverseStock = { code: string; name: string };
+type Valuation = { peRatio: number | null; dividendYield: number | null };
 
 const REQUEST_TIMEOUT = 12_000;
 const MAX_SYMBOLS = 2_000;
@@ -50,25 +51,10 @@ type YahooChart = {
   };
 };
 
-type YahooSummary = {
-  quoteSummary?: {
-    result?: Array<{
-      summaryDetail?: { trailingPE?: { raw?: number }; dividendYield?: { raw?: number } };
-      defaultKeyStatistics?: { trailingPE?: { raw?: number } };
-    }>;
-  };
-};
-
-async function getStockResult(stock: UniverseStock, period1: number, period2: number): Promise<StockResult | null> {
+async function getStockResult(stock: UniverseStock, period1: number, period2: number, valuations: Map<string, Valuation>): Promise<StockResult | null> {
   const symbol = `${stock.code}.TW`;
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d&events=history`;
-  const [chartResponse, summaryResponse] = await Promise.allSettled([
-    fetchJson<YahooChart>(url),
-    fetchJson<YahooSummary>(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=summaryDetail,defaultKeyStatistics`),
-  ]);
-  if (chartResponse.status === "rejected") throw chartResponse.reason;
-  const payload = chartResponse.value;
-  const summary = summaryResponse.status === "fulfilled" ? summaryResponse.value : null;
+  const payload = await fetchJson<YahooChart>(url);
   const result = payload.chart?.result?.[0];
   const quote = result?.indicators?.quote?.[0];
   const highs = quote?.high?.filter((value): value is number => typeof value === "number") ?? [];
@@ -84,25 +70,28 @@ async function getStockResult(stock: UniverseStock, period1: number, period2: nu
   const quoteTime = result.meta?.regularMarketTime
     ? new Date(result.meta.regularMarketTime * 1000).toLocaleTimeString("zh-TW", { hour12: false })
     : "未知";
-  const summaryResult = summary?.quoteSummary?.result?.[0];
-  const peRatio = summaryResult?.summaryDetail?.trailingPE?.raw
-    ?? summaryResult?.defaultKeyStatistics?.trailingPE?.raw
-    ?? null;
-  const dividendYield = summaryResult?.summaryDetail?.dividendYield?.raw ?? null;
+  const valuation = valuations.get(stock.code);
+  const peRatio = valuation?.peRatio ?? null;
+  const dividendYield = valuation?.dividendYield ?? null;
   return { ...stock, price, high, low, midpoint, difference: ((midpoint - price) / midpoint) * 100, quoteTime, peRatio, dividendYield };
 }
 
 async function calculateStocks(): Promise<{ results: StockResult[]; processed: number; failed: number; updatedAt: string }> {
   const universe = await getUniverse();
+  const valuationRows = await fetchJson<Array<Record<string, string>>>("https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_d");
+  const valuations = new Map(valuationRows.map((row) => [row.Code, {
+    peRatio: Number.isFinite(Number(row.PEratio)) && row.PEratio !== "" ? Number(row.PEratio) : null,
+    dividendYield: Number.isFinite(Number(row.DividendYield)) && row.DividendYield !== "" ? Number(row.DividendYield) : null,
+  }]));
   const period2 = Math.floor(Date.now() / 1000);
-  const period1 = Math.floor(new Date(new Date().setMonth(new Date().getMonth() - 6)).getTime() / 1000);
+  const period1 = Math.floor(new Date(new Date().setFullYear(new Date().getFullYear() - 1)).getTime() / 1000);
   const results: StockResult[] = [];
   let failed = 0;
 
   for (let index = 0; index < universe.length; index += 12) {
     const batch = universe.slice(index, index + 12);
     const batchResults = await Promise.all(batch.map(async (stock) => {
-      try { return await getStockResult(stock, period1, period2); } catch { failed += 1; return null; }
+      try { return await getStockResult(stock, period1, period2, valuations); } catch { failed += 1; return null; }
     }));
     results.push(...batchResults.filter((stock): stock is StockResult => stock !== null));
   }
@@ -111,6 +100,6 @@ async function calculateStocks(): Promise<{ results: StockResult[]; processed: n
   return { results, processed: universe.length, failed, updatedAt: new Date().toISOString() };
 }
 
-export const getStockSelection = unstable_cache(calculateStocks, ["stock-selection-six-months"], {
+export const getStockSelection = unstable_cache(calculateStocks, ["stock-selection-one-year"], {
   revalidate: 300,
 });
