@@ -116,36 +116,6 @@ export default function Home() {
   const sortIndicator = (key: SortKey) =>
     sortKey === key ? (sortDirection === "asc" ? "↑" : "↓") : "↕";
 
-  const exportExcel = () => {
-    const periodLabel = months === 12 ? "一年" : "半年";
-    const header =
-      `股票代號,股票名稱,即時價格,即時成交量,${periodLabel}最高價,${periodLabel}最低價,中間值,差異百分比,報價時間\n`;
-    const rows = results
-      .map((stock) =>
-        [
-          stock.code,
-          stock.name,
-          stock.price,
-          stock.volume,
-          stock.high,
-          stock.low,
-          stock.midpoint,
-          `${stock.difference.toFixed(2)}%`,
-          stock.quoteTime,
-        ].join(","),
-      )
-      .join("\n");
-    const blob = new Blob(["\uFEFF" + header + rows], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `台股選股結果-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
   return (
     <main className="shell">
       <section className="content">
@@ -225,48 +195,36 @@ export default function Home() {
               {error ?? "所有股票行情資料皆無法取得"}，請稍後重試。
             </div>
           )}
-          <div className="panel-heading">
-            <div>
-              <h2>符合條件的上市股票</h2>
-              <p>依差異百分比由高至低排序</p>
-            </div>
-            <button className="export-button" onClick={exportExcel}>
-              <Icon>⇩</Icon>匯出 Excel
-            </button>
-          </div>
           <div className="filters">
-         
-            <label className="filter-select">
-              資料區間
-              <select className="period-select" value={months} onChange={(event) => setMonths(Number(event.target.value) as 6 | 12)} disabled={isRefreshing}>
-                {PERIODS.map((period) => (
-                  <option key={period.months} value={period.months}>{period.label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="filter-select">
-              即時價格
-              <select value={maxPrice} onChange={(event) => setMaxPrice(event.target.value as "all" | "100")}>
-                <option value="all">不限</option>
-                <option value="100">100 元以下</option>
-              </select>
-            </label>
-            <label className="filter-select">
-              差異百分比
-              <select value={minDifference} onChange={(event) => setMinDifference(event.target.value as "all" | "50")}>
-                <option value="all">不限</option>
-                <option value="50">50% 以上</option>
-              </select>
-            </label>
-               <label className="search">
-              <Icon>⌕</Icon>
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="搜尋代號或名稱"
-              />
-            </label>
-            <span className="result-count">顯示 {results.length} 筆</span>
+            <div className="filter-row filter-row-primary">
+              <label className="search">
+                <Icon>⌕</Icon>
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜尋股票代號或名稱" />
+              </label>
+              <label className="filter-select">
+                資料區間
+                <select className="period-select" value={months} onChange={(event) => setMonths(Number(event.target.value) as 6 | 12)} disabled={isRefreshing}>
+                  {PERIODS.map((period) => <option key={period.months} value={period.months}>{period.label}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="filter-row filter-row-secondary">
+              <label className="filter-select">
+                即時價格
+                <select value={maxPrice} onChange={(event) => setMaxPrice(event.target.value as "all" | "100")}>
+                  <option value="all">不限</option>
+                  <option value="100">100 元以下</option>
+                </select>
+              </label>
+              <label className="filter-select">
+                差異百分比
+                <select value={minDifference} onChange={(event) => setMinDifference(event.target.value as "all" | "50")}>
+                  <option value="all">不限</option>
+                  <option value="50">50% 以上</option>
+                </select>
+              </label>
+              <span className="result-count">符合 {results.length} 筆</span>
+            </div>
           </div>
           <div className={`table-wrap ${isRefreshing || isFiltering ? "is-loading" : ""}`}>
             {(isRefreshing || isFiltering) && (
@@ -357,8 +315,6 @@ export default function Home() {
             )}
           </div>
           <div className="table-footer">
-            <span>顯示符合條件且資料完整的股票</span>
-            <span>資料來源：TWSE 上市</span>
             <div className="pagination">
               <label>
                 每頁{" "}
