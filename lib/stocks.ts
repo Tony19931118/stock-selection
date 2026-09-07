@@ -8,13 +8,11 @@ export type StockResult = {
   low: number;
   midpoint: number;
   difference: number;
+  volume: number;
   quoteTime: string;
-  peRatio: number | null;
-  dividendYield: number | null;
 };
 
 type UniverseStock = { code: string; name: string };
-type Valuation = { peRatio: number | null; dividendYield: number | null };
 
 const REQUEST_TIMEOUT = 12_000;
 const MAX_SYMBOLS = 2_000;
@@ -44,14 +42,14 @@ async function getUniverse(): Promise<UniverseStock[]> {
 type YahooChart = {
   chart?: {
     result?: Array<{
-      meta?: { regularMarketPrice?: number; regularMarketTime?: number };
+      meta?: { regularMarketPrice?: number; regularMarketTime?: number; regularMarketVolume?: number };
       timestamp?: number[];
       indicators?: { quote?: Array<{ high?: Array<number | null>; low?: Array<number | null> }> };
     }>;
   };
 };
 
-async function getStockResult(stock: UniverseStock, period1: number, period2: number, valuations: Map<string, Valuation>): Promise<StockResult | null> {
+async function getStockResult(stock: UniverseStock, period1: number, period2: number): Promise<StockResult | null> {
   const symbol = `${stock.code}.TW`;
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d&events=history`;
   const payload = await fetchJson<YahooChart>(url);
@@ -60,7 +58,8 @@ async function getStockResult(stock: UniverseStock, period1: number, period2: nu
   const highs = quote?.high?.filter((value): value is number => typeof value === "number") ?? [];
   const lows = quote?.low?.filter((value): value is number => typeof value === "number") ?? [];
   const price = result?.meta?.regularMarketPrice;
-  if (!result || !quote || !highs.length || !lows.length || typeof price !== "number") return null;
+  const volume = result?.meta?.regularMarketVolume;
+  if (!result || !quote || !highs.length || !lows.length || typeof price !== "number" || typeof volume !== "number") return null;
 
   const high = Math.max(...highs);
   const low = Math.min(...lows);
@@ -70,19 +69,11 @@ async function getStockResult(stock: UniverseStock, period1: number, period2: nu
   const quoteTime = result.meta?.regularMarketTime
     ? new Date(result.meta.regularMarketTime * 1000).toLocaleTimeString("zh-TW", { hour12: false })
     : "未知";
-  const valuation = valuations.get(stock.code);
-  const peRatio = valuation?.peRatio ?? null;
-  const dividendYield = valuation?.dividendYield ?? null;
-  return { ...stock, price, high, low, midpoint, difference: ((midpoint - price) / midpoint) * 100, quoteTime, peRatio, dividendYield };
+  return { ...stock, price, high, low, midpoint, difference: ((midpoint - price) / midpoint) * 100, volume, quoteTime };
 }
 
 async function calculateStocks(): Promise<{ results: StockResult[]; processed: number; failed: number; updatedAt: string }> {
   const universe = await getUniverse();
-  const valuationRows = await fetchJson<Array<Record<string, string>>>("https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_d");
-  const valuations = new Map(valuationRows.map((row) => [row.Code, {
-    peRatio: Number.isFinite(Number(row.PEratio)) && row.PEratio !== "" ? Number(row.PEratio) : null,
-    dividendYield: Number.isFinite(Number(row.DividendYield)) && row.DividendYield !== "" ? Number(row.DividendYield) : null,
-  }]));
   const period2 = Math.floor(Date.now() / 1000);
   const period1 = Math.floor(new Date(new Date().setFullYear(new Date().getFullYear() - 1)).getTime() / 1000);
   const results: StockResult[] = [];
@@ -91,7 +82,7 @@ async function calculateStocks(): Promise<{ results: StockResult[]; processed: n
   for (let index = 0; index < universe.length; index += 12) {
     const batch = universe.slice(index, index + 12);
     const batchResults = await Promise.all(batch.map(async (stock) => {
-      try { return await getStockResult(stock, period1, period2, valuations); } catch { failed += 1; return null; }
+      try { return await getStockResult(stock, period1, period2); } catch { failed += 1; return null; }
     }));
     results.push(...batchResults.filter((stock): stock is StockResult => stock !== null));
   }
