@@ -42,6 +42,9 @@ export default function Home() {
   const [sortKey, setSortKey] = useState<SortKey>("difference");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [months, setMonths] = useState<6 | 12>(12);
+  const [maxPrice, setMaxPrice] = useState<"all" | "100">("all");
+  const [minDifference, setMinDifference] = useState<"all" | "50">("all");
+  const [isFiltering, setIsFiltering] = useState(false);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(10);
   const [page, setPage] = useState(1);
 
@@ -80,6 +83,8 @@ export default function Home() {
       stocks
         .filter((stock) => `${stock.code}${stock.name}`.includes(query.trim()))
         .filter((stock) => stock.difference > 0)
+        .filter((stock) => maxPrice === "all" || stock.price <= Number(maxPrice))
+        .filter((stock) => minDifference === "all" || stock.difference >= Number(minDifference))
         .sort((a, b) => {
           const aValue = a[sortKey];
           const bValue = b[sortKey];
@@ -89,7 +94,7 @@ export default function Home() {
             a.code.localeCompare(b.code)
           );
         }),
-    [query, sortDirection, sortKey, stocks],
+    [maxPrice, minDifference, query, sortDirection, sortKey, stocks],
   );
 
   const totalPages = Math.max(1, Math.ceil(results.length / pageSize));
@@ -100,7 +105,10 @@ export default function Home() {
 
   useEffect(() => {
     setPage(1);
-  }, [query, pageSize, months, sortKey, sortDirection]);
+    setIsFiltering(true);
+    const timer = window.setTimeout(() => setIsFiltering(false), 250);
+    return () => window.clearTimeout(timer);
+  }, [query, pageSize, months, maxPrice, minDifference, sortKey, sortDirection]);
   useEffect(() => {
     setPage((currentPage) => Math.min(currentPage, totalPages));
   }, [totalPages]);
@@ -109,8 +117,9 @@ export default function Home() {
     sortKey === key ? (sortDirection === "asc" ? "↑" : "↓") : "↕";
 
   const exportExcel = () => {
+    const periodLabel = months === 12 ? "一年" : "半年";
     const header =
-      "股票代號,股票名稱,即時價格,即時成交量,一年最高價,一年最低價,中間值,差異百分比,報價時間\n";
+      `股票代號,股票名稱,即時價格,即時成交量,${periodLabel}最高價,${periodLabel}最低價,中間值,差異百分比,報價時間\n`;
     const rows = results
       .map((stock) =>
         [
@@ -164,32 +173,6 @@ export default function Home() {
             </button>
           </div>
         </header>
-
-        <div className="notice">
-          <Icon>ⓘ</Icon>
-          <label>
-            資料區間：
-            <select
-              className="period-select"
-              value={months}
-              onChange={(event) =>
-                setMonths(Number(event.target.value) as 6 | 12)
-              }
-            >
-              {PERIODS.map((period) => (
-                <option key={period.months} value={period.months}>
-                  {period.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <span className="notice-source">
-            最新成交價 ·{" "}
-            {updatedAt
-              ? new Date(updatedAt).toLocaleTimeString("zh-TW")
-              : "載入中"}
-          </span>
-        </div>
 
         <section className="metrics">
           <div className="metric-card">
@@ -252,7 +235,30 @@ export default function Home() {
             </button>
           </div>
           <div className="filters">
-            <label className="search">
+         
+            <label className="filter-select">
+              資料區間
+              <select className="period-select" value={months} onChange={(event) => setMonths(Number(event.target.value) as 6 | 12)} disabled={isRefreshing}>
+                {PERIODS.map((period) => (
+                  <option key={period.months} value={period.months}>{period.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="filter-select">
+              即時價格
+              <select value={maxPrice} onChange={(event) => setMaxPrice(event.target.value as "all" | "100")}>
+                <option value="all">不限</option>
+                <option value="100">100 元以下</option>
+              </select>
+            </label>
+            <label className="filter-select">
+              差異百分比
+              <select value={minDifference} onChange={(event) => setMinDifference(event.target.value as "all" | "50")}>
+                <option value="all">不限</option>
+                <option value="50">50% 以上</option>
+              </select>
+            </label>
+               <label className="search">
               <Icon>⌕</Icon>
               <input
                 value={query}
@@ -262,11 +268,18 @@ export default function Home() {
             </label>
             <span className="result-count">顯示 {results.length} 筆</span>
           </div>
-          <div className="table-wrap">
+          <div className={`table-wrap ${isRefreshing || isFiltering ? "is-loading" : ""}`}>
+            {(isRefreshing || isFiltering) && (
+              <div className="loading-overlay" role="status" aria-live="polite">
+                <span className="loading-spinner" />
+                <span>{isRefreshing ? "正在取得市場資料…" : "正在套用查詢條件…"}</span>
+              </div>
+            )}
             <table>
               <thead>
                 <tr>
-                  <th>股票</th>
+                  <th>股票代號</th>
+                  <th>股票名稱</th>
                   <th>即時成交價</th>
                   <th>
                     <button
@@ -317,12 +330,8 @@ export default function Home() {
               <tbody>
                 {paginatedResults.map((stock) => (
                   <tr key={stock.code}>
-                    <td>
-                      <div className="stock-name">
-                        <strong>{stock.code}</strong>
-                        <span>{stock.name}</span>
-                      </div>
-                    </td>
+                    <td className="stock-code">{stock.code}</td>
+                    <td className="stock-name">{stock.name}</td>
                     <td className="price">
                       {stock.price.toLocaleString("zh-TW")}
                     </td>
