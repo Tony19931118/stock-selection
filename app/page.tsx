@@ -15,9 +15,10 @@ type Stock = {
   status?: "處置" | "暫停交易";
 };
 
-type SortKey = "difference";
+type SortKey = "difference" | "volume";
 type SortDirection = "asc" | "desc";
 const PAGE_SIZES = [10, 25, 50] as const;
+const PERIODS = [{ months: 6, label: "半年" }, { months: 12, label: "一年" }] as const;
 
 function Icon({ children }: { children: React.ReactNode }) {
   return <span className="icon" aria-hidden="true">{children}</span>;
@@ -33,6 +34,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("difference");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [months, setMonths] = useState<6 | 12>(12);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(10);
   const [page, setPage] = useState(1);
 
@@ -40,7 +42,7 @@ export default function Home() {
     setIsRefreshing(true);
     setError("");
     try {
-      const response = await fetch("/api/stocks", { cache: "no-store" });
+      const response = await fetch(`/api/stocks?months=${months}`, { cache: "no-store" });
       const data = await response.json() as { results?: Stock[]; processed?: number; failed?: number; updatedAt?: string; error?: string };
       if (!response.ok) throw new Error(data.error ?? "無法取得市場資料");
       setStocks(data.results ?? []);
@@ -52,7 +54,7 @@ export default function Home() {
     } finally {
       setIsRefreshing(false);
     }
-  }, []);
+  }, [months]);
 
   useEffect(() => { void loadStocks(); }, [loadStocks]);
 
@@ -62,9 +64,6 @@ export default function Home() {
     .sort((a, b) => {
       const aValue = a[sortKey];
       const bValue = b[sortKey];
-      if (aValue === null && bValue === null) return a.code.localeCompare(b.code);
-      if (aValue === null) return 1;
-      if (bValue === null) return -1;
       const difference = aValue - bValue;
       return (sortDirection === "asc" ? difference : -difference) || a.code.localeCompare(b.code);
     }), [query, sortDirection, sortKey, stocks]);
@@ -72,7 +71,7 @@ export default function Home() {
   const totalPages = Math.max(1, Math.ceil(results.length / pageSize));
   const paginatedResults = results.slice((page - 1) * pageSize, page * pageSize);
 
-  useEffect(() => { setPage(1); }, [query, pageSize]);
+  useEffect(() => { setPage(1); }, [query, pageSize, months, sortKey, sortDirection]);
   useEffect(() => { setPage((currentPage) => Math.min(currentPage, totalPages)); }, [totalPages]);
 
   const sortIndicator = (key: SortKey) => sortKey === key ? (sortDirection === "asc" ? "↑" : "↓") : "↕";
@@ -93,23 +92,13 @@ export default function Home() {
 
   return (
     <main className="shell">
-      <aside className="sidebar">
-        <div className="brand"><div className="brand-mark">S</div><div><strong>StockScope</strong><span>台股選股工具</span></div></div>
-        <nav className="nav">
-          <a className="active" href="#results"><Icon>⌁</Icon>中間值選股</a>
-          <a href="#data"><Icon>◫</Icon>市場資料</a>
-          <a href="#settings"><Icon>⚙</Icon>設定</a>
-        </nav>
-        <div className="sidebar-bottom"><div className="status-dot"><i />{error ? "資料來源異常" : "資料來源正常"}</div><small>TWSE 上市<br />最後同步 {updatedAt ? new Date(updatedAt).toLocaleTimeString("zh-TW") : "載入中"}</small></div>
-      </aside>
-
       <section className="content">
         <header className="topbar">
           <div><div className="eyebrow">MARKET SCREENER</div><h1>台股中間值選股</h1><p>找出目前成交價低於近一年高低點中間值的股票</p></div>
           <div className="top-actions"><span className="market-open"><i />交易中</span><span className="date-label">{updatedAt ? new Date(updatedAt).toLocaleDateString("zh-TW") : "載入中"}</span><button className="refresh-button" onClick={() => void loadStocks()} disabled={isRefreshing}><Icon>↻</Icon>{isRefreshing ? "更新中" : "重新整理"}</button></div>
         </header>
 
-        <div className="notice"><Icon>ⓘ</Icon><span>資料區間：最近一年交易日資料</span><span className="notice-source">最新成交價 · {updatedAt ? new Date(updatedAt).toLocaleTimeString("zh-TW") : "載入中"}</span></div>
+        <div className="notice"><Icon>ⓘ</Icon><label>資料區間：<select className="period-select" value={months} onChange={(event) => setMonths(Number(event.target.value) as 6 | 12)}>{PERIODS.map((period) => <option key={period.months} value={period.months}>{period.label}</option>)}</select>交易日資料</label><span className="notice-source">最新成交價 · {updatedAt ? new Date(updatedAt).toLocaleTimeString("zh-TW") : "載入中"}</span></div>
 
         <section className="metrics">
           <div className="metric-card"><span className="metric-label">符合條件</span><strong>{results.length}<small> 檔</small></strong><span className="metric-trend positive">↑ 12.5% <em>較昨日</em></span></div>
@@ -122,7 +111,7 @@ export default function Home() {
           {(error || (processed > 0 && failed === processed)) && <div className="error-banner"><Icon>!</Icon>{error ?? "所有股票行情資料皆無法取得"}，請稍後重試。</div>}
           <div className="panel-heading"><div><h2>符合條件的上市股票</h2><p>依差異百分比由高至低排序</p></div><button className="export-button" onClick={exportExcel}><Icon>⇩</Icon>匯出 Excel</button></div>
           <div className="filters"><label className="search"><Icon>⌕</Icon><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜尋代號或名稱" /></label><span className="result-count">顯示 {results.length} 筆</span></div>
-          <div className="table-wrap"><table><thead><tr><th>股票</th><th>即時成交價</th><th>即時成交量</th><th>一年高點</th><th>一年低點</th><th>中間值</th><th><button className="sort-button" onClick={() => setSortDirection((direction) => direction === "asc" ? "desc" : "asc")}>差異百分比 <span className="sort-arrow">{sortIndicator("difference")}</span></button></th><th>報價時間</th></tr></thead><tbody>{paginatedResults.map((stock) => <tr key={stock.code}><td><div className="stock-name"><strong>{stock.code}</strong><span>{stock.name}</span></div></td><td className="price">{stock.price.toLocaleString("zh-TW")}</td><td>{stock.volume.toLocaleString("zh-TW")}</td><td>{stock.high.toLocaleString("zh-TW")}</td><td>{stock.low.toLocaleString("zh-TW")}</td><td>{stock.midpoint.toLocaleString("zh-TW")}</td><td><span className="difference">-{stock.difference.toFixed(2)}%</span></td><td className="quote-time"><i />{stock.quoteTime}</td></tr>)}</tbody></table>{results.length === 0 && <div className="empty-state">查無符合條件的股票</div>}</div>
+          <div className="table-wrap"><table><thead><tr><th>股票</th><th>即時成交價</th><th><button className="sort-button" onClick={() => { if (sortKey === "volume") setSortDirection((direction) => direction === "asc" ? "desc" : "asc"); else { setSortKey("volume"); setSortDirection("desc"); } }}>即時成交量 <span className="sort-arrow">{sortIndicator("volume")}</span></button></th><th>{months === 12 ? "一年" : "半年"}高點</th><th>{months === 12 ? "一年" : "半年"}低點</th><th>中間值</th><th><button className="sort-button" onClick={() => { if (sortKey === "difference") setSortDirection((direction) => direction === "asc" ? "desc" : "asc"); else { setSortKey("difference"); setSortDirection("desc"); } }}>差異百分比 <span className="sort-arrow">{sortIndicator("difference")}</span></button></th><th>報價時間</th></tr></thead><tbody>{paginatedResults.map((stock) => <tr key={stock.code}><td><div className="stock-name"><strong>{stock.code}</strong><span>{stock.name}</span></div></td><td className="price">{stock.price.toLocaleString("zh-TW")}</td><td>{stock.volume.toLocaleString("zh-TW")}</td><td>{stock.high.toLocaleString("zh-TW")}</td><td>{stock.low.toLocaleString("zh-TW")}</td><td>{stock.midpoint.toLocaleString("zh-TW")}</td><td><span className="difference">-{stock.difference.toFixed(2)}%</span></td><td className="quote-time"><i />{stock.quoteTime}</td></tr>)}</tbody></table>{results.length === 0 && <div className="empty-state">查無符合條件的股票</div>}</div>
           <div className="table-footer"><span>顯示符合條件且資料完整的股票</span><span>資料來源：TWSE 上市</span><div className="pagination"><label>每頁 <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value) as (typeof PAGE_SIZES)[number])}>{PAGE_SIZES.map((size) => <option key={size} value={size}>{size} 筆</option>)}</select></label><button onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))} disabled={page === 1}>上一頁</button><span>第 {page} / {totalPages} 頁</span><button onClick={() => setPage((currentPage) => Math.min(totalPages, currentPage + 1))} disabled={page === totalPages}>下一頁</button></div></div>
         </section>
         <footer>本工具僅提供市場資料整理與條件篩選，不構成投資建議。</footer>

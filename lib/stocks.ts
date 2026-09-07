@@ -72,10 +72,12 @@ async function getStockResult(stock: UniverseStock, period1: number, period2: nu
   return { ...stock, price, high, low, midpoint, difference: ((midpoint - price) / midpoint) * 100, volume, quoteTime };
 }
 
-async function calculateStocks(): Promise<{ results: StockResult[]; processed: number; failed: number; updatedAt: string }> {
+async function calculateStocks(months: 6 | 12): Promise<{ results: StockResult[]; processed: number; failed: number; updatedAt: string }> {
   const universe = await getUniverse();
   const period2 = Math.floor(Date.now() / 1000);
-  const period1 = Math.floor(new Date(new Date().setFullYear(new Date().getFullYear() - 1)).getTime() / 1000);
+  const period1Date = new Date();
+  period1Date.setMonth(period1Date.getMonth() - months);
+  const period1 = Math.floor(period1Date.getTime() / 1000);
   const results: StockResult[] = [];
   let failed = 0;
 
@@ -91,6 +93,8 @@ async function calculateStocks(): Promise<{ results: StockResult[]; processed: n
   return { results, processed: universe.length, failed, updatedAt: new Date().toISOString() };
 }
 
-export const getStockSelection = unstable_cache(calculateStocks, ["stock-selection-one-year"], {
-  revalidate: 300,
-});
+export function getStockSelection(months: 6 | 12) {
+  return unstable_cache(() => calculateStocks(months), [`stock-selection-${months}-months`], {
+    revalidate: 300,
+  })();
+}
