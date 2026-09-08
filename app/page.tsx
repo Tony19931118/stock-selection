@@ -67,7 +67,7 @@ const SUBSCRIPTION_COLUMNS: { key: SubscriptionColumnKey; label: string }[] = [
   { key: "shares", label: "申購張數" },
   { key: "qualifiedApplications", label: "總合格件" },
   { key: "lotteryRate", label: "中籤率" },
-  { key: "expectedValue", label: "期望值" },
+  { key: "expectedValue", label: "目前期望值" },
   { key: "status", label: "狀態" },
 ];
 const DEFAULT_SUBSCRIPTION_COLUMNS: SubscriptionColumnKey[] = [
@@ -75,6 +75,15 @@ const DEFAULT_SUBSCRIPTION_COLUMNS: SubscriptionColumnKey[] = [
   "subscriptionPrice", "marketPrice", "profit", "returnRate", "shares",
   "lotteryRate", "expectedValue", "status",
 ];
+type Dividend = {
+  code: string;
+  name: string;
+  dividendYear: string;
+  cashDividend: number;
+  stockDividend: number;
+  exDividendDate: string;
+  paymentDate: string;
+};
 const PAGE_SIZES = [10, 25, 50] as const;
 const PERIODS = [
   { months: 6, label: "半年" },
@@ -89,6 +98,26 @@ function Icon({ children }: { children: React.ReactNode }) {
   );
 }
 
+function formatDividendDate(value: string) {
+  const match = value.match(/^\d{2,4}\/(\d{2})\/(\d{2})$/);
+  return match ? `${match[1]}/${match[2]}` : value;
+}
+
+function dividendDateValue(value: string) {
+  const match = value.match(/^(\d{2,4})\/(\d{2})\/(\d{2})$/);
+  if (!match) return Number.POSITIVE_INFINITY;
+  const year = Number(match[1]) < 1911 ? Number(match[1]) + 1911 : Number(match[1]);
+  return new Date(year, Number(match[2]) - 1, Number(match[3])).getTime();
+}
+
+function hasNoPastDividendDate(item: Dividend) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return [item.exDividendDate, item.paymentDate]
+    .filter(Boolean)
+    .every((date) => dividendDateValue(date) >= today.getTime());
+}
+
 function SidePanel({
   activeView,
   onChange,
@@ -97,9 +126,9 @@ function SidePanel({
   onChange: (view: View) => void;
 }) {
   const items: { view: View; icon: string; label: string }[] = [
-    { view: "stocks", icon: "⌕", label: "目前選股" },
+    { view: "stocks", icon: "⌕", label: "智慧選股" },
     { view: "subscriptions", icon: "▣", label: "申購資訊" },
-    { view: "dividends", icon: "▤", label: "今年股利資訊" },
+    { view: "dividends", icon: "▤", label: "股利資訊" },
   ];
 
   return (
@@ -287,15 +316,57 @@ function SubscriptionsView() {
 }
 
 function DividendsView() {
+  const [dividends, setDividends] = useState<Dividend[]>([]);
+  const [query, setQuery] = useState("");
+  const [updatedAt, setUpdatedAt] = useState("");
+  const [source, setSource] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const loadDividends = useCallback(async () => {
+    setIsLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/dividends", { cache: "no-store" });
+      const data = (await response.json()) as { results?: Dividend[]; updatedAt?: string; source?: string; error?: string };
+      if (!response.ok) throw new Error(data.error ?? "無法取得股利資料");
+      setDividends(data.results ?? []);
+      setUpdatedAt(data.updatedAt ?? "");
+      setSource(data.source ?? "");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "無法取得股利資料");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDividends();
+  }, [loadDividends]);
+
+  const filteredDividends = [...dividends]
+    .sort((a, b) => dividendDateValue(a.paymentDate) - dividendDateValue(b.paymentDate))
+    .filter(hasNoPastDividendDate)
+    .filter((item) =>
+    `${item.code}${item.name}`.includes(query.trim()),
+    );
+
   return (
     <>
       <header className="topbar">
         <div>
           <span className="eyebrow">DIVIDEND OVERVIEW</span>
-          <h1>今年股利資訊</h1>
+          <h1>股利資訊</h1>
           <p>查看上市公司今年度除權息與股利發放資訊</p>
         </div>
-        <span className="date-label">資料來源：公開資訊觀測站</span>
+        <div className="top-actions">
+          <span className="date-label">
+            {updatedAt ? `更新於 ${new Date(updatedAt).toLocaleString("zh-TW")}` : "資料載入中"}
+          </span>
+          <button className="refresh-button" onClick={() => void loadDividends()} disabled={isLoading}>
+            <Icon>↻</Icon>{isLoading ? "更新中" : "重新整理"}
+          </button>
+        </div>
       </header>
       <section className="info-panel">
         <div className="panel-heading">
@@ -303,33 +374,39 @@ function DividendsView() {
             <h2>2026 年股利資訊</h2>
             <p>可依股票代號或名稱搜尋，並查看現金股利與除息日期。</p>
           </div>
-          <span className="panel-badge">今年</span>
+          <span className="panel-badge">{filteredDividends.length} 筆</span>
         </div>
+        <div className="dividend-toolbar">
+          <label className="search">
+            <Icon>⌕</Icon>
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜尋股票代號或名稱" />
+          </label>
+        </div>
+        {error && <div className="error-banner">{error}，請稍後重試。</div>}
         <div className="info-table-wrap">
-          <table className="info-table">
-            <thead>
-              <tr>
-                <th>股票代號</th>
-                <th>股票名稱</th>
-                <th>現金股利</th>
-                <th>股票股利</th>
-                <th>除息日</th>
-                <th>發放日</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td colSpan={6}>
-                  <div className="info-empty compact">
-                    <span className="info-empty-icon">▤</span>
-                    <strong>股利資料即將提供</strong>
-                    <p>待接上年度股利資料來源後，將在此顯示最新資訊。</p>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          {isLoading ? (
+            <div className="info-empty compact"><span className="loading-spinner" /><strong>正在取得股利資料…</strong></div>
+          ) : filteredDividends.length === 0 && !error ? (
+            <div className="info-empty compact"><span className="info-empty-icon">▤</span><strong>查無股利資料</strong></div>
+          ) : (
+            <table className="info-table dividend-table">
+              <thead><tr><th>股票代號</th><th>股票名稱</th><th>現金股利</th><th>股票股利</th><th>除息日</th><th>發放日</th></tr></thead>
+              <tbody>{filteredDividends.map((item) => (
+                <tr key={`${item.code}-${item.dividendYear}`}>
+                  <td>{item.code}</td><td><strong>{item.name}</strong></td>
+                  <td className={item.cashDividend >= 2 ? "dividend-highlight" : undefined}>{item.cashDividend.toFixed(2)}</td>
+                  <td className={item.stockDividend >= 1 ? "dividend-red" : undefined}>{item.stockDividend.toFixed(2)}</td>
+                  <td>{formatDividendDate(item.exDividendDate || "-")}</td>
+                  <td>{formatDividendDate(item.paymentDate || "-")}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
         </div>
+        <p className="data-source-note">
+          資料來源：<a href={source} target="_blank" rel="noreferrer">{source || "MoneyDJ"}</a>
+          ，伺服器每 15 分鐘更新一次。發放日若官方資料未提供則顯示「-」。
+        </p>
       </section>
     </>
   );
@@ -433,7 +510,7 @@ export default function Home() {
           <>
         <header className="topbar">
           <div>
-            <h1>台股中間值選股</h1>
+            <h1>智慧選股</h1>
           </div>
           <div className="top-actions">
             <span className="market-open">
