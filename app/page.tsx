@@ -17,6 +17,22 @@ type Stock = {
 
 type SortKey = "difference" | "volume";
 type SortDirection = "asc" | "desc";
+type View = "stocks" | "subscriptions" | "dividends";
+type Subscription = {
+  lotteryDate: string;
+  code: string;
+  name: string;
+  market: string;
+  subscriptionPeriod: string;
+  allocationDate: string;
+  shares: number | null;
+  subscriptionPrice: number | null;
+  marketPrice: number | null;
+  profit: number | null;
+  returnRate: number | null;
+  lotteryRate: number | null;
+  status: string;
+};
 const PAGE_SIZES = [10, 25, 50] as const;
 const PERIODS = [
   { months: 6, label: "半年" },
@@ -31,7 +47,189 @@ function Icon({ children }: { children: React.ReactNode }) {
   );
 }
 
+function SidePanel({
+  activeView,
+  onChange,
+}: {
+  activeView: View;
+  onChange: (view: View) => void;
+}) {
+  const items: { view: View; icon: string; label: string }[] = [
+    { view: "stocks", icon: "⌕", label: "目前選股" },
+    { view: "subscriptions", icon: "▣", label: "申購資訊" },
+    { view: "dividends", icon: "▤", label: "今年股利資訊" },
+  ];
+
+  return (
+    <aside className="side-panel">
+      <div className="brand">
+        <div>
+          <strong>台股資料站</strong>
+          <span>MARKET DESK</span>
+        </div>
+      </div>
+      <nav aria-label="主要功能">
+        <span className="side-panel-title">功能選單</span>
+        {items.map((item) => (
+          <button
+            key={item.view}
+            className={`side-nav-item ${activeView === item.view ? "active" : ""}`}
+            onClick={() => onChange(item.view)}
+            aria-current={activeView === item.view ? "page" : undefined}
+          >
+            <span className="side-nav-icon" aria-hidden="true">{item.icon}</span>
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      <p className="side-panel-note">資料僅供參考，不構成投資建議。</p>
+    </aside>
+  );
+}
+
+function SubscriptionsView() {
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [updatedAt, setUpdatedAt] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const loadSubscriptions = useCallback(async () => {
+    setIsLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/subscriptions", { cache: "no-store" });
+      const data = (await response.json()) as {
+        results?: Subscription[];
+        updatedAt?: string;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(data.error ?? "無法取得申購資料");
+      setSubscriptions(data.results ?? []);
+      setUpdatedAt(data.updatedAt ?? "");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "無法取得申購資料");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSubscriptions();
+  }, [loadSubscriptions]);
+
+  return (
+    <>
+      <header className="topbar">
+        <div>
+          <span className="eyebrow">MARKET CALENDAR</span>
+          <h1>申購資訊</h1>
+          <p>掌握近期公開申購與抽籤時程</p>
+        </div>
+        <div className="top-actions">
+          <span className="date-label">
+            {updatedAt ? `更新於 ${new Date(updatedAt).toLocaleString("zh-TW")}` : "資料載入中"}
+          </span>
+          <button className="refresh-button" onClick={() => void loadSubscriptions()} disabled={isLoading}>
+            <Icon>↻</Icon>
+            {isLoading ? "更新中" : "重新整理"}
+          </button>
+        </div>
+      </header>
+      <section className="info-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>近期申購</h2>
+            <p>依申購截止日排序，協助掌握市場申購機會。</p>
+          </div>
+          <span className="panel-badge">{subscriptions.length} 筆</span>
+        </div>
+        {error && <div className="error-banner">{error}，請稍後重試。</div>}
+        <div className="info-table-wrap">
+          {isLoading ? (
+            <div className="info-empty compact"><span className="loading-spinner" /><strong>正在取得申購資料…</strong></div>
+          ) : subscriptions.length === 0 && !error ? (
+            <div className="info-empty compact"><span className="info-empty-icon">▣</span><strong>目前沒有申購資料</strong></div>
+          ) : (
+            <table className="info-table subscription-table">
+              <thead>
+                <tr><th>抽籤日期</th><th>股票</th><th>市場</th><th>申購期間</th><th>撥券日</th><th>承銷價</th><th>市價</th><th>報酬率</th><th>中籤率</th><th>狀態</th></tr>
+              </thead>
+              <tbody>
+                {subscriptions.map((item) => (
+                  <tr key={`${item.code}-${item.lotteryDate}`}>
+                    <td>{item.lotteryDate}</td>
+                    <td><strong>{item.code}</strong> {item.name}</td>
+                    <td>{item.market}</td>
+                    <td>{item.subscriptionPeriod}</td>
+                    <td>{item.allocationDate}</td>
+                    <td>{item.subscriptionPrice?.toLocaleString("zh-TW") ?? "-"}</td>
+                    <td>{item.marketPrice?.toLocaleString("zh-TW") ?? "-"}</td>
+                    <td>{item.returnRate === null ? "-" : `${item.returnRate.toFixed(1)}%`}</td>
+                    <td>{item.lotteryRate === null ? "-" : `${item.lotteryRate.toFixed(2)}%`}</td>
+                    <td><span className="panel-badge">{item.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <p className="data-source-note">資料來源：HiStock 公開申購／股票抽籤日程表，伺服器每 10 分鐘更新一次。</p>
+      </section>
+    </>
+  );
+}
+
+function DividendsView() {
+  return (
+    <>
+      <header className="topbar">
+        <div>
+          <span className="eyebrow">DIVIDEND OVERVIEW</span>
+          <h1>今年股利資訊</h1>
+          <p>查看上市公司今年度除權息與股利發放資訊</p>
+        </div>
+        <span className="date-label">資料來源：公開資訊觀測站</span>
+      </header>
+      <section className="info-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>2026 年股利資訊</h2>
+            <p>可依股票代號或名稱搜尋，並查看現金股利與除息日期。</p>
+          </div>
+          <span className="panel-badge">今年</span>
+        </div>
+        <div className="info-table-wrap">
+          <table className="info-table">
+            <thead>
+              <tr>
+                <th>股票代號</th>
+                <th>股票名稱</th>
+                <th>現金股利</th>
+                <th>股票股利</th>
+                <th>除息日</th>
+                <th>發放日</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colSpan={6}>
+                  <div className="info-empty compact">
+                    <span className="info-empty-icon">▤</span>
+                    <strong>股利資料即將提供</strong>
+                    <p>待接上年度股利資料來源後，將在此顯示最新資訊。</p>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
+  );
+}
+
 export default function Home() {
+  const [activeView, setActiveView] = useState<View>("stocks");
   const [query, setQuery] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [stocks, setStocks] = useState<Stock[]>([]);
@@ -118,7 +316,14 @@ export default function Home() {
 
   return (
     <main className="shell">
+      <SidePanel activeView={activeView} onChange={setActiveView} />
       <section className="content">
+        {activeView === "subscriptions" ? (
+          <SubscriptionsView />
+        ) : activeView === "dividends" ? (
+          <DividendsView />
+        ) : (
+          <>
         <header className="topbar">
           <div>
             <h1>台股中間值選股</h1>
@@ -358,6 +563,8 @@ export default function Home() {
           </div>
         </section>
         <footer>本工具僅提供市場資料整理與條件篩選，不構成投資建議。</footer>
+          </>
+        )}
       </section>
     </main>
   );
