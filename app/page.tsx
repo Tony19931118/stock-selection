@@ -113,9 +113,10 @@ function dividendDateValue(value: string) {
 function hasNoPastDividendDate(item: Dividend) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return [item.exDividendDate, item.paymentDate]
-    .filter(Boolean)
-    .every((date) => dividendDateValue(date) >= today.getTime());
+  const exDividendDate = item.exDividendDate ? dividendDateValue(item.exDividendDate) : null;
+  const paymentDate = item.paymentDate ? dividendDateValue(item.paymentDate) : null;
+  return (exDividendDate === null || exDividendDate > today.getTime())
+    && (paymentDate === null || paymentDate >= today.getTime());
 }
 
 function SidePanel({
