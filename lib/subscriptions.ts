@@ -81,7 +81,7 @@ function parseRows(html: string): Subscription[] {
     const lotteryRate = parseNumber(row[12]);
     const expectedValue =
       profit !== null && lotteryRate !== null
-        ? (profit * lotteryRate - 20 * (100 - lotteryRate)) / 100
+        ? (profit * lotteryRate) / 100 - 20
         : null;
 
     return {
