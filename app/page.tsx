@@ -346,7 +346,12 @@ function DividendsView() {
   }, [loadDividends]);
 
   const filteredDividends = [...dividends]
-    .sort((a, b) => dividendDateValue(a.paymentDate) - dividendDateValue(b.paymentDate))
+    .sort((a, b) =>
+      (b.cashDividend + b.stockDividend) - (a.cashDividend + a.stockDividend)
+      || b.cashDividend - a.cashDividend
+      || b.stockDividend - a.stockDividend
+      || dividendDateValue(a.paymentDate) - dividendDateValue(b.paymentDate),
+    )
     .filter(hasNoPastDividendDate)
     .filter((item) =>
     `${item.code}${item.name}`.includes(query.trim()),
