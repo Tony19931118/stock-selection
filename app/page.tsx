@@ -26,13 +26,55 @@ type Subscription = {
   subscriptionPeriod: string;
   allocationDate: string;
   shares: number | null;
+  underwritingShares: number | null;
+  qualifiedApplications: number | null;
   subscriptionPrice: number | null;
   marketPrice: number | null;
   profit: number | null;
   returnRate: number | null;
   lotteryRate: number | null;
+  expectedValue: number | null;
   status: string;
 };
+type SubscriptionColumnKey =
+  | "lotteryDate"
+  | "stock"
+  | "market"
+  | "subscriptionPeriod"
+  | "allocationDate"
+  | "underwritingShares"
+  | "subscriptionPrice"
+  | "marketPrice"
+  | "profit"
+  | "returnRate"
+  | "shares"
+  | "qualifiedApplications"
+  | "lotteryRate"
+  | "expectedValue"
+  | "status";
+
+const SUBSCRIPTION_COLUMNS: { key: SubscriptionColumnKey; label: string }[] = [
+  { key: "lotteryDate", label: "抽籤日期" },
+  { key: "stock", label: "股票代號名稱" },
+  { key: "market", label: "市場" },
+  { key: "subscriptionPeriod", label: "申購期間" },
+  { key: "allocationDate", label: "撥券日" },
+  { key: "underwritingShares", label: "承銷張數" },
+  { key: "subscriptionPrice", label: "承銷價" },
+  { key: "marketPrice", label: "市價" },
+  { key: "profit", label: "獲利" },
+  { key: "returnRate", label: "報酬率" },
+  { key: "shares", label: "申購張數" },
+  { key: "qualifiedApplications", label: "總合格件" },
+  { key: "lotteryRate", label: "中籤率" },
+  { key: "expectedValue", label: "期望值" },
+  { key: "status", label: "狀態" },
+];
+const DEFAULT_SUBSCRIPTION_COLUMNS: SubscriptionColumnKey[] = [
+  "lotteryDate", "stock", "subscriptionPeriod", "allocationDate",
+  "subscriptionPrice", "marketPrice", "profit", "returnRate", "shares",
+  "lotteryRate", "expectedValue", "status",
+];
 const PAGE_SIZES = [10, 25, 50] as const;
 const PERIODS = [
   { months: 6, label: "半年" },
@@ -92,6 +134,10 @@ function SubscriptionsView() {
   const [updatedAt, setUpdatedAt] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "申購中" | "截止日" | "已截止" | "尚未開始">("all");
+  const [visibleColumns, setVisibleColumns] = useState<SubscriptionColumnKey[]>(
+    DEFAULT_SUBSCRIPTION_COLUMNS,
+  );
 
   const loadSubscriptions = useCallback(async () => {
     setIsLoading(true);
@@ -117,6 +163,43 @@ function SubscriptionsView() {
     void loadSubscriptions();
   }, [loadSubscriptions]);
 
+  const renderCell = (item: Subscription, key: SubscriptionColumnKey) => {
+    switch (key) {
+      case "stock": return <><strong>{item.code}</strong> {item.name}</>;
+      case "underwritingShares": return item.underwritingShares?.toLocaleString("zh-TW") ?? "-";
+      case "subscriptionPrice": return item.subscriptionPrice?.toLocaleString("zh-TW") ?? "-";
+      case "marketPrice": return item.marketPrice?.toLocaleString("zh-TW") ?? "-";
+      case "profit": return item.profit?.toLocaleString("zh-TW") ?? "-";
+      case "returnRate": return item.returnRate === null ? "-" : `${item.returnRate.toFixed(1)}%`;
+      case "shares": return item.shares?.toLocaleString("zh-TW") ?? "-";
+      case "qualifiedApplications": return item.qualifiedApplications?.toLocaleString("zh-TW") ?? "-";
+      case "lotteryRate": return item.lotteryRate === null ? "-" : `${item.lotteryRate.toFixed(2)}%`;
+      case "expectedValue":
+        return item.expectedValue === null ? "-" : (
+          <span className={item.expectedValue >= 0 ? "expected-positive" : "expected-negative"}>
+            {item.expectedValue.toLocaleString("zh-TW", { maximumFractionDigits: 2 })}
+          </span>
+        );
+      case "status":
+        if (!item.status) return null;
+        return (
+          <span className={`panel-badge subscription-status ${
+            item.status === "申購中" ? "is-open" : item.status === "截止日" ? "is-closing" : item.status === "已截止" ? "is-closed" : ""
+          }`}>{item.status}</span>
+        );
+      case "lotteryDate": return item.lotteryDate;
+      case "market": return item.market;
+      case "subscriptionPeriod": return item.subscriptionPeriod;
+      case "allocationDate": return item.allocationDate;
+    }
+  };
+
+  const filteredSubscriptions = subscriptions.filter((item) => {
+    if (statusFilter === "all") return true;
+    if (statusFilter === "尚未開始") return item.status === "";
+    return item.status === statusFilter;
+  });
+
   return (
     <>
       <header className="topbar">
@@ -141,32 +224,56 @@ function SubscriptionsView() {
             <h2>近期申購</h2>
             <p>依申購截止日排序，協助掌握市場申購機會。</p>
           </div>
-          <span className="panel-badge">{subscriptions.length} 筆</span>
+          <div className="panel-heading-actions">
+            <details className="column-settings">
+              <summary>欄位設定</summary>
+              <div className="column-menu">
+                {SUBSCRIPTION_COLUMNS.map((column) => (
+                  <label key={column.key}>
+                    <input
+                      type="checkbox"
+                      checked={visibleColumns.includes(column.key)}
+                      onChange={() => setVisibleColumns((current) =>
+                        current.includes(column.key)
+                          ? current.filter((key) => key !== column.key)
+                          : [...current, column.key],
+                      )}
+                    />
+                    {column.label}
+                  </label>
+                ))}
+              </div>
+            </details>
+            <div className="panel-heading-actions">
+              <label className="subscription-filter">
+                狀態
+                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
+                  <option value="all">全部</option>
+                  <option value="尚未開始">尚未開始</option>
+                  <option value="申購中">申購中</option>
+                  <option value="截止日">截止日</option>
+                  <option value="已截止">已截止</option>
+                </select>
+              </label>
+              <span className="panel-badge">{filteredSubscriptions.length} 筆</span>
+            </div>
+          </div>
         </div>
         {error && <div className="error-banner">{error}，請稍後重試。</div>}
         <div className="info-table-wrap">
           {isLoading ? (
             <div className="info-empty compact"><span className="loading-spinner" /><strong>正在取得申購資料…</strong></div>
-          ) : subscriptions.length === 0 && !error ? (
+          ) : filteredSubscriptions.length === 0 && !error ? (
             <div className="info-empty compact"><span className="info-empty-icon">▣</span><strong>目前沒有申購資料</strong></div>
           ) : (
             <table className="info-table subscription-table">
               <thead>
-                <tr><th>抽籤日期</th><th>股票</th><th>市場</th><th>申購期間</th><th>撥券日</th><th>承銷價</th><th>市價</th><th>報酬率</th><th>中籤率</th><th>狀態</th></tr>
+                <tr>{visibleColumns.map((key) => <th key={key}>{SUBSCRIPTION_COLUMNS.find((column) => column.key === key)?.label}</th>)}</tr>
               </thead>
               <tbody>
-                {subscriptions.map((item) => (
+                {filteredSubscriptions.map((item) => (
                   <tr key={`${item.code}-${item.lotteryDate}`}>
-                    <td>{item.lotteryDate}</td>
-                    <td><strong>{item.code}</strong> {item.name}</td>
-                    <td>{item.market}</td>
-                    <td>{item.subscriptionPeriod}</td>
-                    <td>{item.allocationDate}</td>
-                    <td>{item.subscriptionPrice?.toLocaleString("zh-TW") ?? "-"}</td>
-                    <td>{item.marketPrice?.toLocaleString("zh-TW") ?? "-"}</td>
-                    <td>{item.returnRate === null ? "-" : `${item.returnRate.toFixed(1)}%`}</td>
-                    <td>{item.lotteryRate === null ? "-" : `${item.lotteryRate.toFixed(2)}%`}</td>
-                    <td><span className="panel-badge">{item.status}</span></td>
+                    {visibleColumns.map((key) => <td key={key}>{renderCell(item, key)}</td>)}
                   </tr>
                 ))}
               </tbody>

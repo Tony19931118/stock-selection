@@ -8,11 +8,14 @@ export type Subscription = {
   subscriptionPeriod: string;
   allocationDate: string;
   shares: number | null;
+  underwritingShares: number | null;
+  qualifiedApplications: number | null;
   subscriptionPrice: number | null;
   marketPrice: number | null;
   profit: number | null;
   returnRate: number | null;
   lotteryRate: number | null;
+  expectedValue: number | null;
   status: string;
 };
 
@@ -45,6 +48,22 @@ function parseNumber(value: string) {
   return Number.isFinite(number) ? number : null;
 }
 
+function getSubscriptionStatus(period: string, fallback: string, referenceDate = new Date()) {
+  const match = period.match(/^(\d{2})\/(\d{2})~(\d{2})\/(\d{2})$/);
+  if (!match) return fallback;
+
+  const [, startMonth, startDay, endMonth, endDay] = match;
+  const year = referenceDate.getFullYear();
+  const start = new Date(year, Number(startMonth) - 1, Number(startDay));
+  const end = new Date(year, Number(endMonth) - 1, Number(endDay));
+  const today = new Date(year, referenceDate.getMonth(), referenceDate.getDate());
+
+  if (start > today) return "";
+  if (today > end) return "已截止";
+  if (today.getTime() === end.getTime()) return "截止日";
+  return "申購中";
+}
+
 function parseRows(html: string): Subscription[] {
   const table = html.match(/<table[^>]*\bid=["']CPHB1_gv["'][^>]*>([\s\S]*?)<\/table>/i)?.[1];
   if (!table) throw new Error("申購資料表格格式異常");
@@ -58,6 +77,13 @@ function parseRows(html: string): Subscription[] {
 
   return dataRows.map((row) => {
     const stock = row[1].match(/^(\d{4,6})\s+(.+)$/);
+    const profit = parseNumber(row[8]);
+    const lotteryRate = parseNumber(row[12]);
+    const expectedValue =
+      profit !== null && lotteryRate !== null
+        ? (profit * lotteryRate - 20 * (100 - lotteryRate)) / 100
+        : null;
+
     return {
       lotteryDate: row[0],
       code: stock?.[1] ?? row[1],
@@ -65,13 +91,16 @@ function parseRows(html: string): Subscription[] {
       market: row[2],
       subscriptionPeriod: row[3],
       allocationDate: row[4],
-      shares: parseNumber(row[5]),
+      underwritingShares: parseNumber(row[5]),
       subscriptionPrice: parseNumber(row[6]),
       marketPrice: parseNumber(row[7]),
-      profit: parseNumber(row[8]),
+      profit,
       returnRate: parseNumber(row[9]),
-      lotteryRate: parseNumber(row[12]),
-      status: row[13] || "已截止",
+      shares: parseNumber(row[10]),
+      qualifiedApplications: parseNumber(row[11]),
+      lotteryRate,
+      expectedValue,
+      status: getSubscriptionStatus(row[3], row[13] || "已截止"),
     };
   });
 }
