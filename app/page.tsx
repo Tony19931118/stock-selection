@@ -90,6 +90,25 @@ const PERIODS = [
   { months: 12, label: "一年" },
 ] as const;
 
+type MarketStatus = "open" | "closed";
+
+function getMarketStatus(now: Date): MarketStatus {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Taipei",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const weekday = values.weekday;
+  const minutes = Number(values.hour) * 60 + Number(values.minute);
+
+  return weekday !== "Sat" && weekday !== "Sun" && minutes >= 9 * 60 && minutes < 13 * 60 + 30
+    ? "open"
+    : "closed";
+}
+
 function Icon({ children }: { children: React.ReactNode }) {
   return (
     <span className="icon" aria-hidden="true">
@@ -435,6 +454,7 @@ export default function Home() {
   const [isFiltering, setIsFiltering] = useState(false);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(10);
   const [page, setPage] = useState(1);
+  const [marketStatus, setMarketStatus] = useState<MarketStatus>(() => getMarketStatus(new Date()));
 
   const loadStocks = useCallback(async () => {
     setIsRefreshing(true);
@@ -465,6 +485,12 @@ export default function Home() {
   useEffect(() => {
     void loadStocks();
   }, [loadStocks]);
+
+  useEffect(() => {
+    const updateMarketStatus = () => setMarketStatus(getMarketStatus(new Date()));
+    const timer = window.setInterval(updateMarketStatus, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const results = useMemo(
     () =>
@@ -519,9 +545,9 @@ export default function Home() {
             <h1>智慧選股</h1>
           </div>
           <div className="top-actions">
-            <span className="market-open">
+            <span className={`market-status ${marketStatus === "open" ? "market-open" : "market-closed"}`}>
               <i />
-              交易中
+              {marketStatus === "open" ? "交易中" : "休市中"}
             </span>
             <span className="date-label">
               {updatedAt
